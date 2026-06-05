@@ -9,8 +9,10 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/version.h>
+#include <linux/string.h>
 
 #include <linux/netfilter/ipset/ip_set.h>
+#include <net/netlink.h>
 #include <net/netfilter/nf_nat.h>
 #include <net/netns/generic.h>
 #include <linux/inetdevice.h>
@@ -190,6 +192,27 @@ static const struct proc_ops proc_config_ops = {
 #endif
 
 
+static ip_set_id_t wd_ip_set_get_byname(struct net *net, const char *name,
+    struct ip_set **set)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+    struct {
+        struct nlattr nla;
+        char data[IPSET_MAXNAMELEN];
+    } attr;
+
+    if (strscpy(attr.data, name, sizeof(attr.data)) < 0)
+        return IPSET_INVALID_ID;
+
+    attr.nla.nla_type = IPSET_ATTR_NAME;
+    attr.nla.nla_len = nla_attr_size(strlen(attr.data) + 1);
+
+    return ip_set_get_byname(net, &attr.nla, set);
+#else
+    return ip_set_get_byname(net, name, set);
+#endif
+}
+
 static inline int wd_ip_set_test(const char *name, const struct sk_buff *skb,
     struct ip_set_adt_opt *opt, const struct nf_hook_state *state)
 {
@@ -198,7 +221,7 @@ static inline int wd_ip_set_test(const char *name, const struct sk_buff *skb,
     ip_set_id_t index;
     int ret;
 
-    index = ip_set_get_byname(state->net, name, &set);
+    index = wd_ip_set_get_byname(state->net, name, &set);
     if (!set)
         return 0;
 
